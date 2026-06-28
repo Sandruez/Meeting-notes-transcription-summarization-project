@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(venv/Scripts/python -c \"from main import app; print\\('App loaded OK'\\); print\\('Routes:'\\); [print\\(' ', r.methods if hasattr\\(r,'methods'\\) else '', r.path\\) for r in app.routes if hasattr\\(r,'path'\\)]\")"
+    ]
+  }
+}
