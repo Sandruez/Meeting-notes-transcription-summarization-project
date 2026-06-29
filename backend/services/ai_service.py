@@ -331,19 +331,40 @@ def _mock_summary(transcript_text: str, meeting_title: str) -> dict:
     }
 
 
+import re as _re
+
+# Strip a leading "[00:00:05] Speaker Name:" prefix (timestamp optional).
+_PREFIX_RE = _re.compile(r"^\s*(?:\[[\d:.]+\]\s*)?[A-Z][^:]{1,40}:\s*")
+_DUE_RE = _re.compile(
+    r"\b(by\s+\w+|tomorrow|today|this week|next week|end of week|EOW)\b", _re.IGNORECASE
+)
+
+
 def _mock_action_items(transcript_text: str, participants: list) -> list:
     import re
 
-    owners = [p.get("name") if isinstance(p, dict) else str(p) for p in participants] or [None]
+    names = [p.get("name") if isinstance(p, dict) else str(p) for p in participants]
+    owners = names or [None]
     items = []
+    seen = set()
     # Pull sentences that look like commitments.
     for sentence in re.split(r"(?<=[.!?])\s+", transcript_text):
-        low = sentence.lower()
-        if any(kw in low for kw in ("i'll ", "i will ", "can you ", "let's ", "we should ", "to finalize", "to profile", "to audit")):
-            task = sentence.strip()
-            if 12 < len(task) < 160:
-                items.append({"task": task, "owner": owners[len(items) % len(owners)], "due_date_hint": None})
-        if len(items) >= 4:
+        # Strip a leading "[00:00:05] Speaker Name:" prefix if present.
+        clean = _PREFIX_RE.sub("", sentence).strip()
+        low = clean.lower()
+        if any(kw in low for kw in ("i'll ", "i will ", "can you ", "let's ", "we should ", "to finalize", "to profile", "to audit", "i can ")):
+            if not (12 < len(clean) < 160) or clean in seen:
+                continue
+            seen.add(clean)
+            # Try to attribute to a named participant mentioned in the line.
+            owner = next((n for n in names if n and n.split()[0].lower() in low), owners[len(items) % len(owners)])
+            due = _DUE_RE.search(clean)
+            items.append({
+                "task": clean,
+                "owner": owner,
+                "due_date_hint": due.group(0) if due else None,
+            })
+        if len(items) >= 5:
             break
     if not items:
         items = [{"task": "Follow up on discussion points", "owner": owners[0], "due_date_hint": None}]
