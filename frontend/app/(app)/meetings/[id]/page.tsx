@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Pencil, Check, X, Trash2, Download } from "lucide-react";
+import { ArrowLeft, Pencil, Check, X, Trash2, Download, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,12 +14,54 @@ import { TranscriptPanel } from "@/components/transcript/TranscriptPanel";
 import { SummaryPanel } from "@/components/summary/SummaryPanel";
 import { ActionItemList } from "@/components/summary/ActionItemList";
 import { KeyTopics } from "@/components/summary/KeyTopics";
+import { AskFirefliesChat } from "@/components/summary/AskFirefliesChat";
 import { AvatarStack } from "@/components/meetings/AvatarStack";
 import { DeleteMeetingDialog } from "@/components/meetings/DeleteMeetingDialog";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { formatMeetingDate, formatDuration } from "@/lib/utils";
 
-const TABS = ["Summary", "Action Items", "Key Topics", "Notes"] as const;
+const TABS = ["Summary", "Action Items", "Key Topics", "Ask Fireflies", "Notes"] as const;
 type Tab = (typeof TABS)[number];
+
+function fmt(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+function buildContent(meeting: NonNullable<ReturnType<typeof useMeeting>["data"]>) {
+  const transcriptText =
+    meeting.transcript?.lines
+      .map((l) => `[${fmt(l.timestamp_start)}] ${l.speaker_name}: ${l.text}`)
+      .join("\n") ?? "";
+  const header = [
+    `${meeting.title}`,
+    `Date: ${formatMeetingDate(meeting.date)} | Duration: ${formatDuration(meeting.duration_seconds)}`,
+    `Participants: ${meeting.participants.map((p) => p.name).join(", ")}`,
+  ].join("\n");
+  const summary = meeting.summary?.overview ?? "Not generated";
+  const topics = (meeting.summary?.key_topics ?? []).map((t: string) => `- ${t}`).join("\n");
+  const actions = meeting.action_items
+    .map((a) => `- [${a.completed ? "x" : " "}] ${a.task}${a.owner ? ` (${a.owner})` : ""}`)
+    .join("\n");
+  return { header, summary, topics, actions, transcriptText };
+}
+
+function exportBlob(content: string, filename: string, type: string) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 function InlineEditTitle({ title, meetingId }: { title: string; meetingId: string }) {
   const [editing, setEditing] = useState(false);
@@ -73,36 +115,37 @@ export default function MeetingDetailPage() {
   const { seekTo, activeLineIndex, handleTimeUpdate, handleLineClick, handleSeekComplete } =
     useTranscriptSync({ lines, containerRef });
 
-  const exportMarkdown = () => {
+  const handleExport = (format: "md" | "txt" | "pdf") => {
     if (!meeting) return;
-    const transcript_text = meeting.transcript?.lines
-      .map((l) => `[${formatTimestamp(l.timestamp_start)}] ${l.speaker_name}: ${l.text}`)
-      .join("\n") ?? "";
-    const md = [
-      `# ${meeting.title}`,
-      `Date: ${formatMeetingDate(meeting.date)} | Duration: ${formatDuration(meeting.duration_seconds)}`,
-      `Participants: ${meeting.participants.map((p) => p.name).join(", ")}`,
-      "",
-      "## Summary",
-      meeting.summary?.overview ?? "Not generated",
-      "",
-      "## Key Topics",
-      (meeting.summary?.key_topics ?? []).map((t) => `- ${t}`).join("\n"),
-      "",
-      "## Action Items",
-      meeting.action_items.map((a) => `- [${a.completed ? "x" : " "}] ${a.task}${a.owner ? ` (${a.owner})` : ""}`).join("\n"),
-      "",
-      "## Transcript",
-      transcript_text,
-    ].join("\n");
+    const slug = meeting.title.replace(/[^a-z0-9]/gi, "_");
+    const { header, summary, topics, actions, transcriptText } = buildContent(meeting);
 
-    const blob = new Blob([md], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${meeting.title.replace(/[^a-z0-9]/gi, "_")}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
+    if (format === "md") {
+      const md = [
+        `# ${header.split("\n")[0]}`,
+        header.split("\n").slice(1).join("\n"),
+        "", "## Summary", summary,
+        "", "## Key Topics", topics,
+        "", "## Action Items", actions,
+        "", "## Transcript", transcriptText,
+      ].join("\n");
+      exportBlob(md, `${slug}.md`, "text/markdown");
+    }
+
+    if (format === "txt") {
+      const txt = [
+        header,
+        "", "SUMMARY", "=".repeat(40), summary,
+        "", "KEY TOPICS", "=".repeat(40), topics,
+        "", "ACTION ITEMS", "=".repeat(40), actions,
+        "", "TRANSCRIPT", "=".repeat(40), transcriptText,
+      ].join("\n");
+      exportBlob(txt, `${slug}.txt`, "text/plain");
+    }
+
+    if (format === "pdf") {
+      window.print();
+    }
   };
 
   if (isLoading) {
@@ -137,9 +180,18 @@ export default function MeetingDetailPage() {
 
   return (
     <>
+      {/* Print-only styles */}
+      <style>{`
+        @media print {
+          body > *:not(#print-root) { display: none !important; }
+          #print-root { display: block !important; }
+          .no-print { display: none !important; }
+        }
+      `}</style>
+
       <div className="flex h-[calc(100vh-64px)] flex-col">
         {/* Page header */}
-        <div className="shrink-0 border-b border-surface-border bg-white px-4 py-3 dark:border-sidebar-hover dark:bg-sidebar-bg">
+        <div className="no-print shrink-0 border-b border-surface-border bg-white px-4 py-3 dark:border-sidebar-hover dark:bg-sidebar-bg">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-start gap-3">
               <Link href="/meetings" className="mt-1 shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-gray-100 dark:hover:bg-sidebar-hover">
@@ -156,10 +208,28 @@ export default function MeetingDetailPage() {
                 </div>
               </div>
             </div>
+
             <div className="flex shrink-0 items-center gap-2">
-              <Button variant="outline" size="sm" onClick={exportMarkdown}>
-                <Download className="mr-1.5 h-3.5 w-3.5" /> Export
-              </Button>
+              {/* Export dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger className="inline-flex items-center gap-1.5 rounded-lg border border-surface-border bg-white px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-sidebar-hover dark:bg-sidebar-hover dark:text-gray-200 dark:hover:bg-sidebar-active">
+                  <Download className="h-3.5 w-3.5" />
+                  Export
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleExport("md")}>
+                    Export as Markdown
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExport("txt")}>
+                    Export as TXT
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExport("pdf")}>
+                    Export as PDF
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
               <Button size="sm" variant="outline" onClick={() => setDeleteOpen(true)} className="text-red-500 hover:border-red-300 hover:text-red-600">
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -171,7 +241,7 @@ export default function MeetingDetailPage() {
         <div className="flex flex-1 overflow-hidden">
           {/* LEFT: Player + Transcript */}
           <div className="flex flex-[3] min-w-0 flex-col border-r border-surface-border dark:border-sidebar-hover">
-            <div className="shrink-0">
+            <div className="no-print shrink-0">
               <MediaPlayer
                 duration={meeting.duration_seconds}
                 onTimeUpdate={handleTimeUpdate}
@@ -180,18 +250,23 @@ export default function MeetingDetailPage() {
               />
             </div>
             <div ref={containerRef} className="flex-1 overflow-hidden">
-              <TranscriptPanel lines={lines} activeLineIndex={activeLineIndex} onLineClick={handleLineClick} />
+              <TranscriptPanel
+                lines={lines}
+                activeLineIndex={activeLineIndex}
+                onLineClick={handleLineClick}
+                meetingId={meeting.id}
+              />
             </div>
           </div>
 
           {/* RIGHT: Tabs */}
-          <div className="flex flex-[2] min-w-0 flex-col">
+          <div className="no-print flex flex-[2] min-w-0 flex-col">
             <div className="shrink-0 flex overflow-x-auto border-b border-surface-border dark:border-sidebar-hover">
               {TABS.map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`shrink-0 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+                  className={`shrink-0 whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium transition-colors ${
                     activeTab === tab
                       ? "border-brand-500 text-brand-600 dark:text-brand-400"
                       : "border-transparent text-muted-foreground hover:text-foreground"
@@ -214,6 +289,7 @@ export default function MeetingDetailPage() {
                 <ActionItemList meetingId={meeting.id} items={meeting.action_items} participants={meeting.participants} />
               )}
               {activeTab === "Key Topics" && <KeyTopics summary={meeting.summary} />}
+              {activeTab === "Ask Fireflies" && <AskFirefliesChat meetingId={meeting.id} />}
               {activeTab === "Notes" && (
                 <div className="p-4 text-sm text-muted-foreground">Notes feature coming soon.</div>
               )}
@@ -231,11 +307,4 @@ export default function MeetingDetailPage() {
       />
     </>
   );
-}
-
-function formatTimestamp(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds));
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  return `${m}:${String(sec).padStart(2, "0")}`;
 }

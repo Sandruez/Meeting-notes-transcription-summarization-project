@@ -1,15 +1,19 @@
 "use client";
 
 import { useRef, useCallback, useMemo, useState, useEffect } from "react";
-import { Search, X } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Search, X, Bookmark, BookmarkCheck } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn, formatTimestamp, speakerColor, getInitials } from "@/lib/utils";
 import type { TranscriptLine } from "@/lib/types";
+import api from "@/lib/api";
 
 interface TranscriptPanelProps {
   lines: TranscriptLine[];
   activeLineIndex: number;
   onLineClick: (timestamp: number) => void;
+  meetingId: string;
 }
 
 function useTranscriptSearch(lines: TranscriptLine[]) {
@@ -20,8 +24,8 @@ function useTranscriptSearch(lines: TranscriptLine[]) {
     if (!query.trim()) return [];
     const q = query.toLowerCase();
     return lines
-      .map((line, index) => ({ index, positions: line.text.toLowerCase().indexOf(q) !== -1 }))
-      .filter((m) => m.positions)
+      .map((line, index) => ({ index, hit: line.text.toLowerCase().includes(q) }))
+      .filter((m) => m.hit)
       .map((m) => m.index);
   }, [lines, query]);
 
@@ -51,31 +55,59 @@ function highlightText(text: string, query: string) {
   );
 }
 
-export function TranscriptPanel({ lines, activeLineIndex, onLineClick }: TranscriptPanelProps) {
+function HighlightButton({ meetingId, lineId }: { meetingId: string; lineId: string }) {
+  const [highlighted, setHighlighted] = useState(false);
+
+  const highlight = useMutation({
+    mutationFn: () =>
+      api.post(`/api/meetings/${meetingId}/highlights`, { transcript_line_id: lineId }),
+    onSuccess: () => {
+      setHighlighted(true);
+      toast.success("Line highlighted");
+    },
+    onError: () => toast.error("Failed to highlight"),
+  });
+
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); highlight.mutate(); }}
+      className={cn(
+        "shrink-0 rounded p-1 transition-all",
+        highlighted
+          ? "text-brand-500"
+          : "text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-brand-500"
+      )}
+      aria-label="Highlight this line"
+      title="Highlight"
+    >
+      {highlighted
+        ? <BookmarkCheck className="h-3.5 w-3.5" />
+        : <Bookmark className="h-3.5 w-3.5" />
+      }
+    </button>
+  );
+}
+
+export function TranscriptPanel({ lines, activeLineIndex, onLineClick, meetingId }: TranscriptPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const lineRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const { query, setQuery, matches, matchIndex, navigate } = useTranscriptSearch(lines);
 
-  // Scroll to active line during playback
   useEffect(() => {
-    if (activeLineIndex < 0 || query) return; // don't fight search navigation
+    if (activeLineIndex < 0 || query) return;
     const el = lineRefs.current.get(activeLineIndex);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [activeLineIndex, query]);
 
-  // Scroll to current search match
   useEffect(() => {
     if (!matches.length) return;
     const el = lineRefs.current.get(matches[matchIndex]);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [matches, matchIndex]);
 
-  // Build a speaker→color map stable across renders
   const speakerMap = useMemo(() => {
     const seen = new Map<string, number>();
-    lines.forEach((l) => {
-      if (!seen.has(l.speaker_id)) seen.set(l.speaker_id, seen.size);
-    });
+    lines.forEach((l) => { if (!seen.has(l.speaker_id)) seen.set(l.speaker_id, seen.size); });
     return seen;
   }, [lines]);
 
@@ -94,7 +126,7 @@ export function TranscriptPanel({ lines, activeLineIndex, onLineClick }: Transcr
             <Input
               placeholder="Search transcript..."
               value={query}
-              onChange={(e) => { setQuery(e.target.value); }}
+              onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Escape") setQuery("");
                 if (e.key === "Enter") navigate(e.shiftKey ? -1 : 1);
@@ -108,8 +140,8 @@ export function TranscriptPanel({ lines, activeLineIndex, onLineClick }: Transcr
               <span className="text-xs text-muted-foreground whitespace-nowrap">
                 {matches.length === 0 ? "No matches" : `${matchIndex + 1} of ${matches.length}`}
               </span>
-              <button onClick={() => navigate(-1)} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-sidebar-hover text-muted-foreground" aria-label="Previous match">↑</button>
-              <button onClick={() => navigate(1)} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-sidebar-hover text-muted-foreground" aria-label="Next match">↓</button>
+              <button onClick={() => navigate(-1)} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-sidebar-hover text-muted-foreground">↑</button>
+              <button onClick={() => navigate(1)} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-sidebar-hover text-muted-foreground">↓</button>
               <button onClick={() => setQuery("")} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-sidebar-hover text-muted-foreground" aria-label="Clear search">
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -122,7 +154,7 @@ export function TranscriptPanel({ lines, activeLineIndex, onLineClick }: Transcr
       <div ref={containerRef} className="flex-1 overflow-y-auto p-4 space-y-1">
         {lines.map((line, index) => {
           const isActive = index === activeLineIndex;
-          const isSearchMatch = query && matches.includes(index);
+          const isSearchMatch = !!query && matches.includes(index);
           const colorIdx = speakerMap.get(line.speaker_id) ?? 0;
           const color = speakerColor(line.speaker_id, colorIdx);
 
@@ -143,7 +175,6 @@ export function TranscriptPanel({ lines, activeLineIndex, onLineClick }: Transcr
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onLineClick(line.timestamp_start); }}
               aria-label={`${line.speaker_name} at ${formatTimestamp(line.timestamp_start)}: ${line.text}`}
             >
-              {/* Speaker avatar */}
               <div
                 className="flex h-7 w-7 shrink-0 mt-0.5 items-center justify-center rounded-full text-[10px] font-bold text-white"
                 style={{ backgroundColor: color }}
@@ -167,6 +198,8 @@ export function TranscriptPanel({ lines, activeLineIndex, onLineClick }: Transcr
                   {query ? highlightText(line.text, query) : line.text}
                 </p>
               </div>
+
+              <HighlightButton meetingId={meetingId} lineId={line.id} />
             </div>
           );
         })}

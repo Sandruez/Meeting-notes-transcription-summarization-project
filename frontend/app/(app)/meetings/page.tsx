@@ -40,7 +40,10 @@ function MeetingsList() {
             Failed to load meetings
           </p>
           <p className="text-sm text-muted-foreground">
-            Make sure the backend is running on port 8001.
+            Could not reach the API at{" "}
+            <code className="rounded bg-gray-100 px-1 text-xs dark:bg-sidebar-active">
+              {process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001"}
+            </code>
           </p>
         </div>
         <Button variant="outline" onClick={() => refetch()}>

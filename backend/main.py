@@ -45,13 +45,14 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-from routers import meetings, action_items, summaries, ai, search
+from routers import meetings, action_items, summaries, ai, search, highlights
 
 app.include_router(meetings.router, prefix="/api")
 app.include_router(action_items.router, prefix="/api")
 app.include_router(summaries.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
+app.include_router(highlights.router, prefix="/api")
 
 
 @app.get("/health")
