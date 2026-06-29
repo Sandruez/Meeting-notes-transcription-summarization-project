@@ -14,16 +14,25 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 from typing import AsyncGenerator
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# Always load from backend/.env regardless of working directory
+_ENV_PATH = Path(__file__).parent.parent / ".env"
+load_dotenv(_ENV_PATH, override=True)
 
 logger = logging.getLogger("ai_service")
 logging.basicConfig(level=logging.INFO)
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
+
+# Log key status at startup so it's visible in server output
+if NVIDIA_API_KEY and NVIDIA_API_KEY.startswith("nvapi-"):
+    logger.info("NVIDIA AI enabled — key: %s...", NVIDIA_API_KEY[:12])
+else:
+    logger.warning("NVIDIA_API_KEY not set or invalid — using mock AI responses")
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
 SUMMARY_MODEL = "meta/llama-3.1-70b-instruct"
@@ -264,7 +273,8 @@ async def ask_question(
             if delta:
                 yield delta
     except Exception as exc:  # noqa: BLE001
-        logger.error("ask_question streaming failed, using mock: %s", exc)
+        logger.error("ask_question streaming failed (key=%s...): %s",
+                     NVIDIA_API_KEY[:12] if NVIDIA_API_KEY else "NOT SET", exc)
         async for chunk in _mock_answer_stream(question, transcript_text):
             yield chunk
 

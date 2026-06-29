@@ -17,6 +17,22 @@ from services import ai_service
 router = APIRouter(tags=["ai"])
 
 
+@router.get("/ai/status")
+async def ai_status():
+    """Check whether the NVIDIA API key is configured and recognised."""
+    enabled = ai_service.ai_enabled()
+    key = ai_service.NVIDIA_API_KEY
+    return {
+        "ai_enabled": enabled,
+        "key_prefix": key[:12] + "..." if key else None,
+        "models": {
+            "summary": ai_service.SUMMARY_MODEL,
+            "actions": ai_service.ACTION_MODEL,
+            "qa": ai_service.QA_MODEL,
+        } if enabled else None,
+    }
+
+
 @router.post("/ai/process-transcript")
 async def process_transcript(
     payload: ProcessTranscriptRequest,

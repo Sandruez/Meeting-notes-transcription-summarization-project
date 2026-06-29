@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +9,7 @@ from dotenv import load_dotenv
 
 from database import engine, Base
 
-load_dotenv()
+load_dotenv(Path(__file__).parent / ".env", override=True)
 
 # Create tables on startup (idempotent — seed.py drops & recreates separately).
 Base.metadata.create_all(bind=engine)
