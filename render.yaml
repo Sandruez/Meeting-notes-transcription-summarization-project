@@ -4,7 +4,7 @@ services:
     name: fireflies-backend
     runtime: python
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: python start.py
     plan: free
     envVars:
