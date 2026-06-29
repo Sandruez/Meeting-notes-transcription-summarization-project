@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(venv/Scripts/python -c \"from main import app; print\\('App loaded OK'\\); print\\('Routes:'\\); [print\\(' ', r.methods if hasattr\\(r,'methods'\\) else '', r.path\\) for r in app.routes if hasattr\\(r,'path'\\)]\")",
-      "Bash(taskkill /F /PID 7368)"
+      "Bash(taskkill /F /PID 7368)",
+      "Bash(npm run *)",
+      "Bash(venv/Scripts/python seed.py)",
+      "Bash(venv/Scripts/python -c ' *)"
     ]
   }
 }
